@@ -28,7 +28,7 @@ jobs:
 
       - name: Upload Semgrep SARIF Artifact
         if: always()
-        uses: actions/upload-artifact@50761d43402e4167bcf44b93f007c64e0b25578d # v4.0.0
+        uses: actions/upload-artifact@v4
         with:
           name: semgrep-sarif
           path: semgrep.sarif
@@ -79,7 +79,7 @@ jobs:
 
       - name: Upload Trivy Report Artifact
         if: always()
-        uses: actions/upload-artifact@50761d43402e4167bcf44b93f007c64e0b25578d # v4.0.0
+        uses: actions/upload-artifact@v4
         with:
           name: trivy-report
           path: trivy-report.txt
@@ -88,7 +88,7 @@ jobs:
         run: docker run --rm --entrypoint pip ghidra-deobf:ci freeze | tee pip-freeze.txt
 
       - name: Upload pip freeze Artifact
-        uses: actions/upload-artifact@50761d43402e4167bcf44b93f007c64e0b25578d # v4.0.0
+        uses: actions/upload-artifact@v4
         with:
           name: pip-freeze
           path: pip-freeze.txt
@@ -136,7 +136,7 @@ jobs:
 
       - name: Upload log chẩn đoán Artifact
         if: always() && (hashFiles('analysis.log') != '' || hashFiles('diag.log') != '')
-        uses: actions/upload-artifact@50761d43402e4167bcf44b93f007c64e0b25578d # v4.0.0
+        uses: actions/upload-artifact@v4
         with:
           name: functional-test-logs
           path: |
