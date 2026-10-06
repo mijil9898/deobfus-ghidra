@@ -86,7 +86,7 @@ jobs:
           set -o pipefail
           docker run --rm \
             -v "${PWD}:/workspace" \
-            -v "/tmp:/tmp:ro" \
+            -v "/tmp/ghidra-deobf.tar:/tmp/ghidra-deobf.tar:ro" \
             -v "${HOME}/.cache/trivy:/root/.cache/trivy" \
             aquasec/trivy:0.55.2 image \
             --exit-code 1 \
