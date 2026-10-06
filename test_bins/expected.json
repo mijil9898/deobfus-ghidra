@@ -1,0 +1,61 @@
+{
+  "note": "Ground truth cho bộ kiểm thử deobfuscation. Tên hàm giải mã áp dụng cho bản O0 (có symbol). Bản stripped phải đối chiếu qua expected_addresses.json.",
+  "programs": {
+    "xor_simple": {
+      "source": "xor_simple.c",
+      "decode_functions": [
+        {
+          "name": "decode_xor",
+          "algorithm": "xor_single_byte",
+          "key_hex": "0x41",
+          "call_count": 3,
+          "note": "XOR từng byte với khoá 1 byte cố định. Hàm được gọi 3 lần trong main."
+        }
+      ],
+      "strings": [
+        {"encoded_hex": "09242D2D2E",     "plaintext": "Hello"},
+        {"encoded_hex": "162E332D25",     "plaintext": "World"},
+        {"encoded_hex": "122422332435",   "plaintext": "Secret"}
+      ]
+    },
+    "xor_multibyte": {
+      "source": "xor_multibyte.c",
+      "decode_functions": [
+        {
+          "name": "decode_xor_multi",
+          "algorithm": "xor_multi_byte",
+          "key_hex": "DEADBEEF",
+          "call_count": 2,
+          "note": "XOR với khoá 4 byte lặp vòng. Hàm được gọi 2 lần trong main."
+        }
+      ],
+      "strings": [
+        {"encoded_hex": "91DDDB819FE4",   "plaintext": "OpenAI"},
+        {"encoded_hex": "99C5D78BACCC",   "plaintext": "Ghidra"}
+      ]
+    },
+    "add_rol": {
+      "source": "add_rol.c",
+      "decode_functions": [
+        {
+          "name": "decode_add_rol",
+          "algorithm": "add_then_rol",
+          "key_add_hex": "0x05",
+          "shift_rol": 3,
+          "call_count": 2,
+          "note": "Mã hoá 2 bước: ADD khoá rồi ROL. Giải mã: ROR rồi SUB. Hàm được gọi 2 lần."
+        }
+      ],
+      "strings": [
+        {"encoded_hex": "328BAB6B33",     "plaintext": "Alpha"},
+        {"encoded_hex": "3A53CB33",       "plaintext": "Beta"}
+      ]
+    },
+    "safe": {
+      "source": "safe.c",
+      "decode_functions": [],
+      "strings": [],
+      "note": "KHÔNG có hàm giải mã chuỗi. Các hàm XOR dùng cho checksum, swap, mask. Module deobfuscation KHÔNG được gắn cờ bất kỳ hàm nào."
+    }
+  }
+}

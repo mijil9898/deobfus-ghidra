@@ -1,0 +1,135 @@
+# Giai đoạn 2: DevSecOps Pipeline (SAST -> Build -> Container Scan)
+name: devsecops-pipeline
+
+on:
+  push:
+  workflow_dispatch:
+
+# Quyền tối thiểu: chỉ đọc code.
+permissions:
+  contents: read
+
+jobs:
+  sast_semgrep:
+    name: "Semgrep SAST (Code Analysis)"
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      
+      - name: Run Semgrep Security Gate
+        # Quét SAST, dừng pipeline (exit 1) nếu có lỗi bảo mật cấp độ ERROR
+        run: |
+          docker run --rm -v "${PWD}:/src" returntocorp/semgrep:latest \
+            semgrep scan --config "p/python" --config "p/security-audit" --error \
+            --sarif-output /src/semgrep.sarif /src
+
+      - name: Upload Semgrep SARIF Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          if-no-files-found: warn
+
+  build_and_scan:
+    name: "Build & Trivy Scan"
+    needs: sast_semgrep
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: docker build -t ghidra-deobf:ci .
+
+      - name: Trivy Vulnerability Scanner (Security Gate)
+        # Quét lỗ hổng Image, dừng pipeline (exit 1) nếu có CVE mức HIGH hoặc CRITICAL
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${PWD}:/workspace" \
+            aquasec/trivy:0.55.2 image \
+            --exit-code 1 \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --ignorefile /workspace/.trivyignore.yaml \
+            --format table \
+            ghidra-deobf:ci | tee trivy-report.txt
+
+      - name: Upload Trivy Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: trivy-report.txt
+
+      - name: Ghi phiên bản gói Python trong image (pip freeze)
+        run: docker run --rm --entrypoint pip ghidra-deobf:ci freeze | tee pip-freeze.txt
+
+      - name: Upload pip freeze Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-freeze
+          path: pip-freeze.txt
+
+      - name: Smoke test --help
+        run: docker run --rm ghidra-deobf:ci --help
+
+      - name: Functional test (--network none)
+        # Chạy phân tích thật (JVM + PyGhidra) không mạng, so kết quả giải mã với giá trị mong đợi.
+        # Binary build ngay trong CI (test_bins/bin/ bị .gitignore) và mount read-only.
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bins"
+          gcc -O0 -o "${RUNNER_TEMP}/bins/xor_simple_O0" test_bins/xor_simple.c
+          docker run --rm --network none \
+            -v "${RUNNER_TEMP}/bins:/bins:ro" \
+            ghidra-deobf:ci /bins/xor_simple_O0 > result.json 2> >(tee analysis.log >&2)
+          python3 - <<'EOF'
+          import json
+          res = json.load(open("result.json"))["results"]
+          # In ánh xạ địa chỉ → chuỗi để phát hiện ghép sai thứ tự
+          for r in res: print(r.get("call_addr"), r.get("status"), r.get("decoded"))
+          got = sorted(r["decoded"] for r in res if r.get("status") == "ok")
+          want = sorted(["Hello", "World", "Secret"])
+          print("got:", got, "want:", want)
+          assert got == want, "Kết quả giải mã không khớp"
+          EOF
+
+      - name: Chẩn đoán khi lỗi (dump C decompile của caller)
+        # Chỉ chạy khi có analysis.log, tránh tự lỗi và che nguyên nhân thật của bước trước.
+        if: failure() && hashFiles('analysis.log') != ''
+        # Lấy địa chỉ hàm giải mã từ analysis.log rồi in C decompile thật để sửa parser theo dữ liệu thật.
+        run: |
+          addr="$(grep -oE '\* decode_xor @ 0x[0-9a-f]+' analysis.log | grep -oE '0x[0-9a-f]+' | head -1)"
+          echo "Địa chỉ hàm giải mã: ${addr}"
+          test -n "${addr}" || { echo "Không tìm thấy địa chỉ decode_xor trong analysis.log" | tee diag.log; exit 1; }
+          # Container chạy UID 10001 nên thư mục mount phải ghi được (PyGhidra tạo project cạnh binary).
+          chmod -R a+rwX "${RUNNER_TEMP}/bins"
+          docker run --rm --network none \
+            -v "${RUNNER_TEMP}/bins:/bins" \
+            --entrypoint python3 ghidra-deobf:ci \
+            /app/debug_pcode.py /bins/xor_simple_O0 "${addr}" 2>&1 | tee diag.log
+
+      - name: Upload log chẩn đoán Artifact
+        if: always() && (hashFiles('analysis.log') != '' || hashFiles('diag.log') != '')
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional-test-logs
+          path: |
+            analysis.log
+            diag.log
+            result.json
+          if-no-files-found: ignore
+
+
+      - name: Kiểm tra chạy non-root
+        run: |
+          uid="$(docker run --rm --entrypoint id ghidra-deobf:ci -u)"
+          echo "uid trong container: $uid"
+          test "$uid" != "0"

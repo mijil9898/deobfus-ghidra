@@ -1,0 +1,7 @@
+# Chặn tất cả, chỉ mở những file ảnh cần (tránh lọt venv/, test_bins/, .git/).
+*
+!Dockerfile
+!requirements.txt
+!ghidra_auto.py
+!find_candidates.py
+!debug_pcode.py

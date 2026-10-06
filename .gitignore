@@ -1,0 +1,21 @@
+# === Binary / Build artifacts ===
+test_bins/bin/
+*.o
+*.exe
+
+# === Ghidra / PyGhidra ===
+*.gpr
+*.rep
+*.lock
+
+# === Tự động sinh mỗi lần biên dịch ===
+test_bins/expected_addresses.json
+
+# === Python ===
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# === Thư mục project PyGhidra tự tạo (<binary>_ghidra) ===
+*_ghidra/

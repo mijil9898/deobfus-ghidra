@@ -1,0 +1,7 @@
+# Phiên bản lấy từ venv dev (env.sh in ra "pyghidra = 3.1.0").
+pyghidra==3.1.0
+
+# Ghim các phiên bản an toàn để vượt qua Trivy (bản cũ bị lỗi HIGH)
+msgpack>=1.0.6
+urllib3>=2.2.2
+setuptools>=70.0.0
