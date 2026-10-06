@@ -1,4 +1,5 @@
-# Giai đoạn 3: DevSecOps Pipeline Tối Ưu & An Toàn (Pin SHA, Buildx Cache, No docker.sock, GHCR Publish)
+# Giai đoạn 3: DevSecOps Pipeline Tối Ưu & An Toàn 
+# (Buildx GHA Cache, Trivy DB Cache, Security Traceability GHCR Publish, Dependabot Sync)
 name: devsecops-pipeline
 
 on:
@@ -20,7 +21,7 @@ jobs:
           persist-credentials: false
 
       - name: Run Semgrep Security Gate
-        # Quét SAST mã nguồn, dừng pipeline (exit 1) nếu phát hiện lỗ hổng (--error)
+        # Quét SAST mã nguồn, dừng pipeline (exit 1) ở mọi mức phát hiện (--error)
         run: |
           docker run --rm -v "${PWD}:/src" returntocorp/semgrep:latest \
             semgrep scan --config "p/python" --config "p/security-audit" --error \
@@ -46,20 +47,37 @@ jobs:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@c1000676b7e53f090d8eddd82c16158a2d12e846 # v3.8.0
+        uses: docker/setup-buildx-action@v3
 
-      - name: Build image with Buildx GHA Cache
-        # Tối ưu thời gian build bằng bộ nhớ đệm Buildx (GHA cache)
-        run: |
-          docker buildx build \
-            --cache-from type=gha \
-            --cache-to type=gha,mode=max \
-            -t ghidra-deobf:ci \
-            --load .
+      - name: Cache Trivy Vulnerability Database
+        # Lưu cache cơ sở dữ liệu Trivy DB để tránh tải lại ~119MB mỗi lần chạy (giảm ~2m30s)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ hashFiles('.trivyignore.yaml') }}
+          restore-keys: |
+            trivy-db-${{ runner.os }}-
 
-      - name: Xuất Docker Image ra Tarball (Loại bỏ mount docker.sock)
-        # Tăng cường an toàn: không mount docker.sock trực tiếp vào container quét
+      - name: Build image (cache GHA)
+        # Dùng docker/build-push-action với load: true để GHA cache hoạt động đúng chuẩn
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ghidra-deobf:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Xuất Docker Image ra Tarball (Security Traceability & Loại bỏ docker.sock)
+        # Tăng cường an toàn: xuất image thành file tarball để quét Trivy và tái sử dụng khi publish
         run: docker save ghidra-deobf:ci -o /tmp/ghidra-deobf.tar
+
+      - name: Upload Verified Docker Image Artifact
+        # Lưu trữ artifact image đã kiểm định để công đoạn publish GHCR tải về push trực tiếp
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-image-tarball
+          path: /tmp/ghidra-deobf.tar
 
       - name: Trivy Vulnerability Scanner (Security Gate)
         # Quét lỗ hổng từ file tarball, dừng pipeline (exit 1) nếu có CVE mức HIGH hoặc CRITICAL
@@ -69,6 +87,7 @@ jobs:
           docker run --rm \
             -v "${PWD}:/workspace" \
             -v "/tmp:/tmp:ro" \
+            -v "${HOME}/.cache/trivy:/root/.cache/trivy" \
             aquasec/trivy:0.55.2 image \
             --exit-code 1 \
             --severity HIGH,CRITICAL \
@@ -162,24 +181,32 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@c1000676b7e53f090d8eddd82c16158a2d12e846 # v3.8.0
+      - name: Download Verified Docker Image Artifact
+        # Tải lại đúng file tarball image đã được quét Trivy và qua Functional test thành công
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-image-tarball
+          path: /tmp
+
+      - name: Load Verified Docker Image
+        run: docker load -i /tmp/ghidra-deobf.tar
 
       - name: Log in to GitHub Container Registry (GHCR)
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and Push Image to GHCR
-        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
-        with:
-          context: .
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Tag and Push Verified Image to GHCR
+        # Push trực tiếp image đã được kiểm định 100%, đảm bảo tính nhất quán tuyệt đối (Security Traceability)
+        run: |
+          IMAGE_ID="ghcr.io/${{ github.repository }}"
+          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+          docker tag ghidra-deobf:ci "${IMAGE_ID}:latest"
+          docker tag ghidra-deobf:ci "${IMAGE_ID}:${{ github.sha }}"
+          docker push "${IMAGE_ID}:latest"
+          docker push "${IMAGE_ID}:${{ github.sha }}"
