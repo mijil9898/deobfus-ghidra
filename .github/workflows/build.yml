@@ -22,7 +22,7 @@ jobs:
       - name: Run Semgrep Security Gate
         # Quét SAST mã nguồn, dừng pipeline (exit 1) nếu phát hiện lỗ hổng (--error)
         run: |
-          docker run --rm -v "${PWD}:/src" returntocorp/semgrep:1.98.0 \
+          docker run --rm -v "${PWD}:/src" returntocorp/semgrep:latest \
             semgrep scan --config "p/python" --config "p/security-audit" --error \
             --sarif-output /src/semgrep.sarif /src
 
