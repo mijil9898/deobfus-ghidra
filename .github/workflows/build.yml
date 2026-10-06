@@ -93,12 +93,18 @@ jobs:
           python3 - <<'EOF'
           import json
           res = json.load(open("result.json"))["results"]
-          # In ánh xạ địa chỉ → chuỗi để phát hiện ghép sai thứ tự
-          for r in res: print(r.get("call_addr"), r.get("status"), r.get("decoded"))
-          got = sorted(r["decoded"] for r in res if r.get("status") == "ok")
-          want = sorted(["Hello", "World", "Secret"])
-          print("got:", got, "want:", want)
-          assert got == want, "Kết quả giải mã không khớp"
+          # In và assert theo từng cặp (địa chỉ call -> chuỗi giải mã)
+          mapping = {}
+          for r in res:
+              print(f"  {r.get('call_addr')}: [{r.get('status')}] {r.get('decoded')}")
+              if r.get("status") == "ok":
+                  mapping[r.get("call_addr")] = r.get("decoded")
+          
+          # Kiểm tra khớp 1-1 từng địa chỉ lời gọi với chuỗi mong đợi
+          assert mapping.get("0x10120c") == "Hello", f"Giải mã sai tại 0x10120c: {mapping.get('0x10120c')}"
+          assert mapping.get("0x101222") == "World", f"Giải mã sai tại 0x101222: {mapping.get('0x101222')}"
+          assert mapping.get("0x101238") == "Secret", f"Giải mã sai tại 0x101238: {mapping.get('0x101238')}"
+          print("[+] Kiểm thử ánh xạ địa chỉ -> chuỗi THÀNH CÔNG!")
           EOF
 
       - name: Chẩn đoán khi lỗi (dump C decompile của caller)
