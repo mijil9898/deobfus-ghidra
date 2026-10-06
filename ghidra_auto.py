@@ -133,58 +133,72 @@ def extract_strings_from_c(c_code,func_name,algo):
         buf_map[base] = bytes(buf)
         print(f"  [parse] array {base!r} = {bytes(buf).hex()}", file=sys.stderr)
 
-    # --- Stack model: ghidra "local_XX" = vi tri -0xXX. Gom byte tu strncpy + gan so nguyen ---
-    def _stk(name):
-        m=re.fullmatch(r"local_([0-9a-fA-F]+)",name)
-        return -int(m.group(1),16) if m else None
-    mem={}
-    for bk,bv in buf_map.items():
-        a=_stk(bk)
+    # --- Stack model: ghidra "local_XX", "uStack_XX", "acStack_XX"... = vi tri -0xXX. Gom byte tu strncpy + gan so nguyen ---
+    def _lam_sach_bieu_thuc(bieu_thuc):
+        """Loại bỏ ép kiểu cast (char *), (undefined1 *) và toán tử lấy địa chỉ & trong C decompiled."""
+        bt = re.sub(r'\([^)]+\)', '', bieu_thuc)
+        return bt.strip().lstrip('&').strip()
+
+    def _stk(ten):
+        ten_sach = _lam_sach_bieu_thuc(ten)
+        m = re.fullmatch(r"(?:local_|[a-zA-Z]*Stack_|stack_?)([0-9a-fA-F]+)", ten_sach)
+        return -int(m.group(1), 16) if m else None
+
+    mem = {}
+    for bk, bv in buf_map.items():
+        a = _stk(bk)
         if a is not None:
-            for j,b in enumerate(bv): mem[a+j]=b
-    tsize={"undefined":1,"undefined1":1,"undefined2":2,"undefined4":4,"undefined8":8,
-           "byte":1,"char":1,"short":2,"ushort":2,"int":4,"uint":4,
-           "long":8,"ulong":8,"longlong":8,"ulonglong":8}
-    vsize={}
-    for m in re.finditer(r"^\s*(?:unsigned\s+)?(\w+)\s+(local_[0-9a-fA-F]+)\s*;",c_code,re.M):
-        if m.group(1) in tsize: vsize[m.group(2)]=tsize[m.group(1)]
-    for m in re.finditer(r"^\s*(local_[0-9a-fA-F]+)\s*=\s*(-?0x[0-9a-fA-F]+|\d+)U?L{0,2}\s*;",c_code,re.M):
-        a=_stk(m.group(1)); sz=vsize.get(m.group(1))
+            for j, b in enumerate(bv): mem[a + j] = b
+
+    tsize = {"undefined": 1, "undefined1": 1, "undefined2": 2, "undefined4": 4, "undefined8": 8,
+             "byte": 1, "char": 1, "short": 2, "ushort": 2, "int": 4, "uint": 4,
+             "long": 8, "ulong": 8, "longlong": 8, "ulonglong": 8}
+    vsize = {}
+    for m in re.finditer(r"^\s*(?:unsigned\s+)?(\w+)\s+((?:local_|[a-zA-Z]*Stack_|stack_?)[0-9a-fA-F]+)\s*;", c_code, re.M):
+        if m.group(1) in tsize: vsize[m.group(2)] = tsize[m.group(1)]
+
+    for m in re.finditer(r"^\s*((?:local_|[a-zA-Z]*Stack_|stack_?)[0-9a-fA-F]+)\s*=\s*(-?0x[0-9a-fA-F]+|\d+)U?L{0,2}\s*;", c_code, re.M):
+        a = _stk(m.group(1)); sz = vsize.get(m.group(1))
         if a is None or not sz: continue
-        v=int(m.group(2),0)&((1<<(8*sz))-1)
-        for j,b in enumerate(v.to_bytes(sz,"little")): mem[a+j]=b
-        print(f"  [parse] scalar {m.group(1)!r} = {v:0{sz*2}x} ({sz}B)",file=sys.stderr)
-    def stack_read(dest,length):
-        m=re.fullmatch(r"(local_[0-9a-fA-F]+)(?:\+(\w+))?",dest)
+        v = int(m.group(2), 0) & ((1 << (8 * sz)) - 1)
+        for j, b in enumerate(v.to_bytes(sz, "little")): mem[a + j] = b
+        print(f"  [parse] scalar {m.group(1)!r} = {v:0{sz*2}x} ({sz}B)", file=sys.stderr)
+
+    def stack_read(dich, do_dai):
+        dich_sach = _lam_sach_bieu_thuc(dich)
+        m = re.fullmatch(r"((?:local_|[a-zA-Z]*Stack_|stack_?)[0-9a-fA-F]+)(?:\+(\w+))?", dich_sach)
         if not m: return None
-        a=_stk(m.group(1))
+        a = _stk(m.group(1))
+        if a is None: return None
         if m.group(2):
-            try: a+=int(m.group(2),0)
+            try: a += int(m.group(2), 0)
             except ValueError: return None
-        if all(a+j in mem for j in range(length)): return bytes(mem[a+j] for j in range(length))
+        if all(a + j in mem for j in range(do_dai)): return bytes(mem[a + j] for j in range(do_dai))
         return None
 
-    pat_dec=re.compile(r"\b"+re.escape(func_name)+r"\s*\(\s*([^)]+)\)\s*;",re.S)
+    pat_dec = re.compile(r"\b" + re.escape(func_name) + r"\s*\(\s*([^)]+)\)\s*;", re.S)
     for m in pat_dec.finditer(c_code):
-        args=[a.strip() for a in m.group(1).split(",")]
-        if len(args)<2: continue
-        dest=_nws(resolve(args[0]))
-        try: length=int(args[1],0)
+        args = [a.strip() for a in m.group(1).split(",")]
+        if len(args) < 2: continue
+        dest_raw = resolve(args[0])
+        dest = _nws(dest_raw)
+        dest_clean = _nws(_lam_sach_bieu_thuc(dest_raw))
+        try: length = int(args[1], 0)
         except: continue
-        if len(args)>=3:
-            try: last_key=int(args[2],0)
+        if len(args) >= 3:
+            try: last_key = int(args[2], 0)
             except ValueError:
                 # Tham số key có mặt nhưng không đọc được (vd 'Z', (char)0x5a): không dùng lại khoá cũ.
-                last_key=None
-                print(f"      [!] khong parse duoc key {args[2]!r}",file=sys.stderr)
-        key=last_key
+                last_key = None
+                print(f"      [!] khong parse duoc key {args[2]!r}", file=sys.stderr)
+        key = last_key
         if key is None:
-            results.append(dict(dest=dest,length=length,status="key_unknown")); continue
+            results.append(dict(dest=dest, length=length, status="key_unknown")); continue
         
-        raw = buf_map.get(dest)
+        raw = buf_map.get(dest) or buf_map.get(dest_clean)
         if raw is None:
             # Handle local_13+5
-            m_off = re.match(r'^([A-Za-z0-9_]+)\+([x0-9a-fA-F]+)$', dest)
+            m_off = re.match(r'^([A-Za-z0-9_]+)\+([x0-9a-fA-F]+)$', dest_clean)
             if m_off:
                 base = m_off.group(1)
                 try:
@@ -192,11 +206,12 @@ def extract_strings_from_c(c_code,func_name,algo):
                     if base in buf_map: raw = buf_map[base][offset:]
                 except: pass
                 
-        if raw is None: raw=stack_read(dest,length)
+        if raw is None: raw = stack_read(dest, length)
 
         if raw is None:
-            for bk,bv in buf_map.items():
-                if dest.startswith(bk) or bk.startswith(dest): raw=bv; break
+            for bk, bv in buf_map.items():
+                if dest_clean.startswith(bk) or bk.startswith(dest_clean): raw = bv; break
+
                 
         if raw is None:
             results.append(dict(dest=dest,length=length,key=hex(key),status="buf_not_found")); continue
