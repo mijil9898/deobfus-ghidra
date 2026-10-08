@@ -29,7 +29,7 @@ jobs:
 
       - name: Upload Semgrep SARIF Artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: semgrep-sarif
           path: semgrep.sarif
@@ -74,7 +74,7 @@ jobs:
 
       - name: Upload Verified Docker Image Artifact
         # Lưu trữ artifact image đã kiểm định để công đoạn publish GHCR tải về push trực tiếp
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: verified-image-tarball
           path: /tmp/ghidra-deobf.tar
@@ -98,7 +98,7 @@ jobs:
 
       - name: Upload Trivy Report Artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: trivy-report
           path: trivy-report.txt
@@ -107,7 +107,7 @@ jobs:
         run: docker run --rm --entrypoint pip ghidra-deobf:ci freeze | tee pip-freeze.txt
 
       - name: Upload pip freeze Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pip-freeze
           path: pip-freeze.txt
@@ -155,7 +155,7 @@ jobs:
 
       - name: Upload log chẩn đoán Artifact
         if: always() && (hashFiles('analysis.log') != '' || hashFiles('diag.log') != '')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: functional-test-logs
           path: |
