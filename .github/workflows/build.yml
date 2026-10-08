@@ -186,7 +186,7 @@ jobs:
 
       - name: Download Verified Docker Image Artifact
         # Tải lại đúng file tarball image đã được quét Trivy và qua Functional test thành công
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: verified-image-tarball
           path: /tmp
