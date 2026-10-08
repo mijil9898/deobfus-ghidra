@@ -14,7 +14,7 @@ vulnerabilities:
       có thể bypass mTLS theo SNI). Chấp nhận bởi Mijil, 2026-10-06.
       Lý do: lỗi chỉ xảy ra phía server TLS của Netty; tool không mở cổng lắng nghe, chạy với --network none.
       Khắc phục: nâng Ghidra khi có bản cập nhật Netty. Xem lại: 2027-10-01.
-    expired_at: "2027-10-01"
+    expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-8763"
     paths:
       - "opt/ghidra/Ghidra/Features/PyGhidra/lib/PyGhidra.jar"
@@ -23,7 +23,7 @@ vulnerabilities:
       khi kiểm tra chuỗi chứng chỉ). Chấp nhận bởi Mijil, 2026-10-06.
       Lý do: tool không xác thực chứng chỉ X.509 của bên thứ ba, không kết nối mạng, đã chạy thử với --network none.
       Khắc phục: nâng Ghidra khi có bản cập nhật BouncyCastle. Xem lại: 2027-10-01.
-    expired_at: "2027-10-01"
+    expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-13506"
     paths:
       - "opt/ghidra/Ghidra/Features/PyGhidra/lib/PyGhidra.jar"
@@ -32,7 +32,7 @@ vulnerabilities:
       có thể cạn stack khi parse ASN.1 độc hại). Chấp nhận bởi Mijil, 2026-10-06.
       Lý do: tool không parse ASN.1/chứng chỉ từ nguồn bên ngoài; chạy trong container non-root, --network none,
       tác động tối đa là crash tiến trình phân tích. Khắc phục: nâng Ghidra. Xem lại: 2027-10-01.
-    expired_at: "2027-10-01"
+    expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-44249"
     paths:
       - "opt/ghidra/Ghidra/Features/PyGhidra/lib/PyGhidra.jar"
@@ -41,7 +41,7 @@ vulnerabilities:
       Chấp nhận bởi Mijil, 2026-10-06.
       Lý do: tool không dùng bộ lọc IP/subnet của Netty, không nhận kết nối mạng, đã chạy thử với --network none.
       Khắc phục: nâng Ghidra khi có bản cập nhật Netty. Xem lại: 2027-10-01.
-    expired_at: "2027-10-01"
+    expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-45416"
     paths:
       - "opt/ghidra/Ghidra/Features/PyGhidra/lib/PyGhidra.jar"
@@ -50,7 +50,7 @@ vulnerabilities:
       cạn tài nguyên từ xa). Chấp nhận bởi Mijil, 2026-10-06.
       Lý do: cần kẻ tấn công kết nối TLS tới tool; không có cổng lắng nghe, chạy với --network none.
       Khắc phục: nâng Ghidra khi có bản cập nhật Netty. Xem lại: 2027-10-01.
-    expired_at: "2027-10-01"
+    expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-50010"
     paths:
       - "opt/ghidra/Ghidra/Features/PyGhidra/lib/PyGhidra.jar"
@@ -59,4 +59,4 @@ vulnerabilities:
       hostname TLS). Chấp nhận bởi Mijil, 2026-10-06.
       Lý do: tool không thực hiện kết nối TLS client, đã chạy thử với --network none.
       Khắc phục: nâng Ghidra khi có bản cập nhật Netty. Xem lại: 2027-10-01.
-    expired_at: "2027-10-01"
+    expired_at: 2027-10-01T00:00:00Z
