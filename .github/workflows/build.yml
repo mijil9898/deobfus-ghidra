@@ -51,7 +51,7 @@ jobs:
 
       - name: Cache Trivy Vulnerability Database
         # Lưu cache cơ sở dữ liệu Trivy DB để tránh tải lại ~119MB mỗi lần chạy (giảm ~2m30s)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/trivy
           key: trivy-db-${{ runner.os }}-${{ hashFiles('.trivyignore.yaml') }}
