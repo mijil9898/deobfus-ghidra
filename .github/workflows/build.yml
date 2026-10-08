@@ -47,7 +47,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Cache Trivy Vulnerability Database
         # Lưu cache cơ sở dữ liệu Trivy DB để tránh tải lại ~119MB mỗi lần chạy (giảm ~2m30s)
