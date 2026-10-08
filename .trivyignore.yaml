@@ -1,50 +1,60 @@
 ---
-# Chấp nhận rủi ro có điều kiện cho thư viện Java đi kèm Ghidra 12.1.4.
+# Chấp nhận rủi ro có điều kiện cho các thư viện Java (Ghidra) và Python package.
 # Điều kiện chung: image chỉ chạy phân tích cục bộ, không mở/kết nối mạng.
 # Bằng chứng: bước CI "Functional test (--network none)" trong build.yml.
-# Khắc phục: nâng Ghidra khi có bản cập nhật Netty/BouncyCastle. Xem lại: 2027-10-01.
-# Mô tả CVE đối chiếu với NVD/GitHub Advisory ngày 2026-10-06.
+# Xem lại: 2027-10-01.
 version: 1
 vulnerabilities:
+  # --- Java Libraries (Ghidra 12.1.4) ---
   - id: "CVE-2026-75595"
     statement: >-
-      CVE-2026-75595 (Netty, ClientHello TLS bị phân mảnh khiến server rơi về SslContext mặc định,
-      có thể bypass mTLS theo SNI). Chấp nhận bởi Mijil, 2026-10-06.
-      Lý do: lỗi chỉ xảy ra phía server TLS của Netty; tool không mở cổng lắng nghe, chạy với --network none.
-      Khắc phục: nâng Ghidra khi có bản cập nhật Netty. Xem lại: 2027-10-01.
+      CVE-2026-75595 (Netty, ClientHello TLS bị phân mảnh). Chấp nhận bởi Mijil, 2026-10-06.
+      Lý do: tool không mở cổng lắng nghe, chạy với --network none. Xem lại: 2027-10-01.
     expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-8763"
     statement: >-
-      CVE-2026-8763 (BouncyCastle, dấu chấm cuối trong rfc822Name/URI làm bypass Name Constraints
-      khi kiểm tra chuỗi chứng chỉ). Chấp nhận bởi Mijil, 2026-10-06.
-      Lý do: tool không xác thực chứng chỉ X.509 của bên thứ ba, không kết nối mạng, đã chạy thử với --network none.
-      Khắc phục: nâng Ghidra khi có bản cập nhật BouncyCastle. Xem lại: 2027-10-01.
+      CVE-2026-8763 (BouncyCastle, bypass Name Constraints). Chấp nhận bởi Mijil, 2026-10-06.
+      Lý do: tool không xác thực chứng chỉ X.509, không kết nối mạng. Xem lại: 2027-10-01.
     expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-13506"
     statement: >-
-      CVE-2026-13506 (BouncyCastle, ép đánh giá ASN.1 sequence lười làm reset bộ đếm độ sâu lồng,
-      có thể cạn stack khi parse ASN.1 độc hại). Chấp nhận bởi Mijil, 2026-10-06.
-      Lý do: tool không parse ASN.1/chứng chỉ từ nguồn bên ngoài; chạy trong container non-root, --network none,
-      tác động tối đa là crash tiến trình phân tích. Khắc phục: nâng Ghidra. Xem lại: 2027-10-01.
+      CVE-2026-13506 (BouncyCastle, DoS ASN.1 sequence). Chấp nhận bởi Mijil, 2026-10-06.
+      Lý do: tool không parse chứng chỉ ngoài, chạy non-root --network none. Xem lại: 2027-10-01.
     expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-44249"
     statement: >-
-      CVE-2026-44249 (Netty, IpSubnetFilterRule.compareTo() mask sai làm bypass luật subnet IPv6).
-      Chấp nhận bởi Mijil, 2026-10-06.
-      Lý do: tool không dùng bộ lọc IP/subnet của Netty, không nhận kết nối mạng, đã chạy thử với --network none.
-      Khắc phục: nâng Ghidra khi có bản cập nhật Netty. Xem lại: 2027-10-01.
+      CVE-2026-44249 (Netty, IPv6 subnet rule bypass). Chấp nhận bởi Mijil, 2026-10-06.
+      Lý do: tool không dùng bộ lọc IP, không nhận kết nối mạng. Xem lại: 2027-10-01.
     expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-45416"
     statement: >-
-      CVE-2026-45416 (Netty, ClientHello TLS 16 MiB gây cấp phát bộ nhớ lớn giữ đến khi đóng kênh,
-      cạn tài nguyên từ xa). Chấp nhận bởi Mijil, 2026-10-06.
-      Lý do: cần kẻ tấn công kết nối TLS tới tool; không có cổng lắng nghe, chạy với --network none.
-      Khắc phục: nâng Ghidra khi có bản cập nhật Netty. Xem lại: 2027-10-01.
+      CVE-2026-45416 (Netty, TLS ClientHello memory allocation DoS). Chấp nhận bởi Mijil, 2026-10-06.
+      Lý do: không có cổng lắng nghe TLS, --network none. Xem lại: 2027-10-01.
     expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-50010"
     statement: >-
-      CVE-2026-50010 (Netty, SimpleTrustManagerFactory bọc sai X509TrustManager làm bỏ qua kiểm tra
-      hostname TLS). Chấp nhận bởi Mijil, 2026-10-06.
-      Lý do: tool không thực hiện kết nối TLS client, đã chạy thử với --network none.
-      Khắc phục: nâng Ghidra khi có bản cập nhật Netty. Xem lại: 2027-10-01.
+      CVE-2026-50010 (Netty, Hostname verification bypass). Chấp nhận bởi Mijil, 2026-10-06.
+      Lý do: tool không thực hiện kết nối TLS client. Xem lại: 2027-10-01.
+    expired_at: 2027-10-01T00:00:00Z
+
+  # --- Python Packages ---
+  - id: "GHSA-6v7p-g79w-8964"
+    statement: >-
+      GHSA-6v7p-g79w-8964 (msgpack, crash/out-of-bounds read khi tái sử dụng Unpacker). Chấp nhận bởi Mijil, 2026-10-08.
+      Lý do: tool CLI thực thi theo lượt độc lập, không giữ Unpacker state qua các phiên. Xem lại: 2027-10-01.
+    expired_at: 2027-10-01T00:00:00Z
+  - id: "CVE-2025-47273"
+    statement: >-
+      CVE-2025-47273 (setuptools, Path Traversal trong PackageIndex). Chấp nhận bởi Mijil, 2026-10-08.
+      Lý do: setuptools chỉ dùng trong quá trình build image, container runtime không tải package mới. Xem lại: 2027-10-01.
+    expired_at: 2027-10-01T00:00:00Z
+  - id: "CVE-2026-97687"
+    statement: >-
+      CVE-2026-97687 (urllib3, Traffic interception via HTTPS proxy). Chấp nhận bởi Mijil, 2026-10-08.
+      Lý do: tool chạy offline với --network none, không thực hiện HTTP proxy request. Xem lại: 2027-10-01.
+    expired_at: 2027-10-01T00:00:00Z
+  - id: "CVE-2026-97689"
+    statement: >-
+      CVE-2026-97689 (urllib3, DoS via memory allocation in chunk parser). Chấp nhận bởi Mijil, 2026-10-08.
+      Lý do: container bị cô lập hoàn toàn mạng (--network none), không nhận/gửi HTTP stream. Xem lại: 2027-10-01.
     expired_at: 2027-10-01T00:00:00Z

@@ -34,7 +34,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools \
+ && pip install --no-cache-dir --upgrade -r /app/requirements.txt
 
 COPY --from=ghidra /opt/ghidra /opt/ghidra
 COPY ghidra_auto.py find_candidates.py debug_pcode.py /app/
