@@ -3,12 +3,10 @@
 # Điều kiện chung: image chỉ chạy phân tích cục bộ, không mở/kết nối mạng.
 # Bằng chứng: bước CI "Functional test (--network none)" trong build.yml.
 # Khắc phục: nâng Ghidra khi có bản cập nhật Netty/BouncyCastle. Xem lại: 2027-10-01.
-# Mô tả CVE đối chiếu với NVD/GitHub Advisory ngày 2026-10-06 (kiểm tra lại với cột Title của báo cáo Trivy).
+# Mô tả CVE đối chiếu với NVD/GitHub Advisory ngày 2026-10-06.
 version: 1
 vulnerabilities:
   - id: "CVE-2026-75595"
-    paths:
-      - "opt/ghidra/Ghidra/Features/PyGhidra/lib/PyGhidra.jar"
     statement: >-
       CVE-2026-75595 (Netty, ClientHello TLS bị phân mảnh khiến server rơi về SslContext mặc định,
       có thể bypass mTLS theo SNI). Chấp nhận bởi Mijil, 2026-10-06.
@@ -16,8 +14,6 @@ vulnerabilities:
       Khắc phục: nâng Ghidra khi có bản cập nhật Netty. Xem lại: 2027-10-01.
     expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-8763"
-    paths:
-      - "opt/ghidra/Ghidra/Features/PyGhidra/lib/PyGhidra.jar"
     statement: >-
       CVE-2026-8763 (BouncyCastle, dấu chấm cuối trong rfc822Name/URI làm bypass Name Constraints
       khi kiểm tra chuỗi chứng chỉ). Chấp nhận bởi Mijil, 2026-10-06.
@@ -25,8 +21,6 @@ vulnerabilities:
       Khắc phục: nâng Ghidra khi có bản cập nhật BouncyCastle. Xem lại: 2027-10-01.
     expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-13506"
-    paths:
-      - "opt/ghidra/Ghidra/Features/PyGhidra/lib/PyGhidra.jar"
     statement: >-
       CVE-2026-13506 (BouncyCastle, ép đánh giá ASN.1 sequence lười làm reset bộ đếm độ sâu lồng,
       có thể cạn stack khi parse ASN.1 độc hại). Chấp nhận bởi Mijil, 2026-10-06.
@@ -34,8 +28,6 @@ vulnerabilities:
       tác động tối đa là crash tiến trình phân tích. Khắc phục: nâng Ghidra. Xem lại: 2027-10-01.
     expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-44249"
-    paths:
-      - "opt/ghidra/Ghidra/Features/PyGhidra/lib/PyGhidra.jar"
     statement: >-
       CVE-2026-44249 (Netty, IpSubnetFilterRule.compareTo() mask sai làm bypass luật subnet IPv6).
       Chấp nhận bởi Mijil, 2026-10-06.
@@ -43,8 +35,6 @@ vulnerabilities:
       Khắc phục: nâng Ghidra khi có bản cập nhật Netty. Xem lại: 2027-10-01.
     expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-45416"
-    paths:
-      - "opt/ghidra/Ghidra/Features/PyGhidra/lib/PyGhidra.jar"
     statement: >-
       CVE-2026-45416 (Netty, ClientHello TLS 16 MiB gây cấp phát bộ nhớ lớn giữ đến khi đóng kênh,
       cạn tài nguyên từ xa). Chấp nhận bởi Mijil, 2026-10-06.
@@ -52,8 +42,6 @@ vulnerabilities:
       Khắc phục: nâng Ghidra khi có bản cập nhật Netty. Xem lại: 2027-10-01.
     expired_at: 2027-10-01T00:00:00Z
   - id: "CVE-2026-50010"
-    paths:
-      - "opt/ghidra/Ghidra/Features/PyGhidra/lib/PyGhidra.jar"
     statement: >-
       CVE-2026-50010 (Netty, SimpleTrustManagerFactory bọc sai X509TrustManager làm bỏ qua kiểm tra
       hostname TLS). Chấp nhận bởi Mijil, 2026-10-06.
