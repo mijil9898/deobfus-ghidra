@@ -53,7 +53,7 @@ jobs:
         #   git ls-remote --tags https://github.com/actions/checkout 'refs/tags/v4.*'
         #   Chọn tag semver ổn định mới nhất; SHA commit là dòng kết thúc ^{}.
         #   Ghi: uses: actions/checkout@<40-hex> # vX.Y.Z
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -100,7 +100,7 @@ jobs:
       TARBALL: /tmp/ghidra-deobf.tar
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -306,7 +306,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -462,7 +462,7 @@ jobs:
       TARBALL: /tmp/ghidra-deobf-daily.tar
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
