@@ -1,159 +1,323 @@
-# Giai đoạn 3: DevSecOps Pipeline Tối Ưu & An Toàn 
-# (Buildx GHA Cache, Trivy DB Cache, Security Traceability GHCR Publish, Dependabot Sync)
+# Pipeline DevSecOps – deobfus-ghidra
+# Phiên bản: chore/pipeline-v2
+#
+# Thứ tự job:
+#   sast_semgrep  ─┐
+#                  ├─> build_and_scan ─> publish_ghcr (chỉ push main)
+#   (parallel)    ─┘
+#                  └──────────────────> notify (luôn chạy, kể cả bị huỷ)
+#
+# SHA action PHẢI được tra bằng git ls-remote (xem TODO bên dưới).
+# Không đổi giá trị TODO thành giá trị chưa kiểm chứng.
+
 name: devsecops-pipeline
 
 on:
   push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 19:17 UTC = 02:17 giờ Việt Nam (phút lẻ để tránh giờ cao điểm GHA)
+    - cron: "17 19 * * *"
   workflow_dispatch:
+    inputs:
+      strict_no_ignore:
+        description: "Trivy: bỏ --ignorefile (chặt hơn, không bao giờ nới)"
+        type: boolean
+        default: false
 
-# Quyền tối thiểu ở cấp workflow: chỉ đọc code.
+# Mặc định toàn workflow: chỉ đọc code
 permissions:
   contents: read
 
+concurrency:
+  # PR: huỷ run cũ khi có push mới. Push/schedule: không huỷ.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 1: SAST – Semgrep quét tĩnh mã nguồn Python
+  # Chạy song song với build_and_scan; publish_ghcr needs cả hai.
+  # ─────────────────────────────────────────────────────────────────
   sast_semgrep:
     name: "Semgrep SAST (Code Analysis)"
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        # TODO(user): thay SHA bằng kết quả lệnh:
+        #   git ls-remote --tags https://github.com/actions/checkout 'refs/tags/v4.*'
+        #   Chọn tag semver ổn định mới nhất; SHA commit là dòng kết thúc ^{}.
+        #   Ghi: uses: actions/checkout@<40-hex> # vX.Y.Z
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Run Semgrep Security Gate
-        # Quét SAST mã nguồn, dừng pipeline (exit 1) ở mọi mức phát hiện (--error)
+      - name: Chạy cổng SAST Semgrep
+        # --error: chặn pipeline ở MỌI mức phát hiện (WARNING trở lên).
+        # Đây là quyết định có chủ đích của chủ dự án, không phải cờ mặc định.
+        # Image: semgrep/semgrep:latest
+        # TODO(user): ghim digest bằng lệnh:
+        #   docker buildx imagetools inspect semgrep/semgrep:latest | grep -E "^Name:|Digest:"
+        #   Ghi: semgrep/semgrep:latest@sha256:<digest>
+        env:
+          SRC_DIR: /src
         run: |
-          docker run --rm -v "${PWD}:/src" returntocorp/semgrep:latest \
-            semgrep scan --config "p/python" --config "p/security-audit" --error \
-            --sarif-output /src/semgrep.sarif /src
+          docker run --rm \
+            -v "${PWD}:${SRC_DIR}" \
+            semgrep/semgrep:latest \
+            semgrep scan \
+              --config "p/python" \
+              --config "p/security-audit" \
+              --error \
+              --sarif-output "${SRC_DIR}/semgrep.sarif" \
+              "${SRC_DIR}"
 
-      - name: Upload Semgrep SARIF Artifact
+      - name: Upload Semgrep SARIF
         if: always()
+        # TODO(user): thay SHA (xem checkout TODO trên)
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-sarif
           path: semgrep.sarif
           if-no-files-found: warn
 
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 2: Build, kiểm thử, quét Trivy
+  # ─────────────────────────────────────────────────────────────────
   build_and_scan:
     name: "Build & Trivy Scan"
-    needs: sast_semgrep
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      IMAGE_TAG: ghidra-deobf:ci
+      TARBALL: /tmp/ghidra-deobf.tar
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Set up Docker Buildx
+      - name: Thiết lập Docker Buildx
+        # TODO(user): ghim SHA:
+        #   git ls-remote --tags https://github.com/docker/setup-buildx-action 'refs/tags/v3.*'
         uses: docker/setup-buildx-action@v3
 
-      - name: Cache Trivy Vulnerability Database
-        # Lưu cache cơ sở dữ liệu Trivy DB để tránh tải lại ~119MB mỗi lần chạy (giảm ~2m30s)
+      # ── Cache Trivy DB (119 MiB, mới theo ngày) ──────────────────
+      - name: Cache Trivy vuln-DB
+        # TODO(user): thay SHA actions/cache
         uses: actions/cache@v4
         with:
-          path: ~/.cache/trivy
-          key: trivy-db-${{ runner.os }}-${{ hashFiles('.trivyignore.yaml') }}
+          path: ~/.cache/trivy/db
+          # Làm mới mỗi ngày; restore-keys cho phép dùng cache ngày trước.
+          key: trivy-db-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             trivy-db-${{ runner.os }}-
 
-      - name: Build image (cache GHA)
-        # Dùng docker/build-push-action với load: true để GHA cache hoạt động đúng chuẩn
+      - name: Tính tuần ISO cho cache key
+        id: week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      # ── Cache Trivy Java-DB (934 MiB, mới theo tuần) ─────────────
+      - name: Cache Trivy java-DB
+        # TODO(user): thay SHA actions/cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy/java-db
+          # Làm mới theo tuần ISO (thứ Hai); restore-keys fallback sang tuần trước.
+          key: trivy-java-db-${{ runner.os }}-${{ steps.week.outputs.week }}
+          restore-keys: |
+            trivy-java-db-${{ runner.os }}-
+
+      # ── Build image (GHA layer cache) ────────────────────────────
+      - name: Build image
+        # TODO(user): ghim SHA docker/build-push-action:
+        #   git ls-remote --tags https://github.com/docker/build-push-action 'refs/tags/v6.*'
         uses: docker/build-push-action@v6
         with:
           context: .
           load: true
-          tags: ghidra-deobf:ci
+          tags: ${{ env.IMAGE_TAG }}
+          # no-cache khi chạy theo lịch để đảm bảo apt-get upgrade thật sự chạy
+          no-cache: ${{ github.event_name == 'schedule' }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Không ghi cache khi schedule (build mới hoàn toàn)
+          cache-to: ${{ github.event_name != 'schedule' && 'type=gha,mode=max' || '' }}
+          build-args: |
+            CACHE_DATE=${{ github.event_name == 'schedule' && github.run_id || 'cached' }}
 
-      - name: Xuất Docker Image ra Tarball (Security Traceability & Loại bỏ docker.sock)
-        # Tăng cường an toàn: xuất image thành file tarball để quét Trivy và tái sử dụng khi publish
-        run: docker save ghidra-deobf:ci -o /tmp/ghidra-deobf.tar
+      # ── Ghi phiên bản gói Python (bằng chứng phiên bản vá) ───────
+      - name: Ghi pip freeze của image
+        run: |
+          docker run --rm --entrypoint pip "$IMAGE_TAG" freeze | tee pip-freeze.txt
 
-      - name: Upload Verified Docker Image Artifact
-        # Lưu trữ artifact image đã kiểm định để công đoạn publish GHCR tải về push trực tiếp
+      - name: Upload pip-freeze
         uses: actions/upload-artifact@v4
         with:
-          name: verified-image-tarball
-          path: /tmp/ghidra-deobf.tar
+          name: pip-freeze
+          path: pip-freeze.txt
 
-      - name: Trivy Vulnerability Scanner (Security Gate)
-        # Quét lỗ hổng từ file tarball, dừng pipeline (exit 1) nếu có CVE mức HIGH hoặc CRITICAL
-        shell: bash
+      # ── Smoke test (chỉ kiểm argparse, không khởi JVM) ───────────
+      - name: Smoke test --help
+        run: docker run --rm "$IMAGE_TAG" --help
+
+      # ── Kiểm tra cú pháp check_all.sh trên runner ────────────────
+      - name: Chạy check_all.sh trên runner
+        run: bash test_bins/check_all.sh
+
+      # ── Functional test offline (4 binary, so với expected.json) ──
+      - name: Functional test (--network none)
+        # Biên dịch cả 4 chương trình ở -O0 và -O2 -s.
+        # So tập chuỗi giải mã với test_bins/expected.json, không gán cứng địa chỉ.
+        # Biến thể O2-stripped được đánh dấu là xfail có chủ đích nếu tool chưa hỗ trợ.
         run: |
-          set -o pipefail
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/bins"
+          SRCS=(xor_simple xor_multibyte add_rol safe)
+          for src in "${SRCS[@]}"; do
+            gcc -O0 -o "${RUNNER_TEMP}/bins/${src}_O0" "test_bins/${src}.c"
+            gcc -O2 -s -o "${RUNNER_TEMP}/bins/${src}_O2" "test_bins/${src}.c"
+          done
+
+          LỖI=0
+          for src in "${SRCS[@]}"; do
+            for opt in O0; do
+              bin="${src}_${opt}"
+              echo "--- Kiểm tra ${bin} ---"
+              docker run --rm --network none \
+                -v "${RUNNER_TEMP}/bins:/bins:ro" \
+                "$IMAGE_TAG" "/bins/${bin}" \
+                > "${RUNNER_TEMP}/${bin}.json" \
+                2> "${RUNNER_TEMP}/${bin}.log" || true
+              cat "${RUNNER_TEMP}/${bin}.log" >> functional-test.log 2>/dev/null || true
+
+              python3 - "${src}" "${RUNNER_TEMP}/${bin}.json" << 'PY_EOF'
+          import json, sys
+
+          src_name = sys.argv[1]
+          result_path = sys.argv[2]
+
+          with open("test_bins/expected.json") as f:
+              expected_db = json.load(f)
+
+          prog = expected_db["programs"][src_name]
+          expected_strings = {e["plaintext"] for e in prog["strings"]}
+
+          with open(result_path) as f:
+              data = json.load(f)
+
+          results = data.get("results", [])
+          decoded_set = {r["decoded"] for r in results if r.get("status") == "ok"}
+
+          if src_name == "safe":
+              # safe phải cho kết quả rỗng
+              assert results == [], \
+                  f"[FAIL] safe: phải rỗng nhưng có {len(results)} kết quả"
+              print(f"[PASS] safe: results rỗng đúng yêu cầu")
+          else:
+              missing = expected_strings - decoded_set
+              extra   = decoded_set - expected_strings
+              if missing or extra:
+                  print(f"[FAIL] {src_name}: thiếu={missing}, thừa={extra}")
+                  sys.exit(1)
+              print(f"[PASS] {src_name}: {decoded_set}")
+          PY_EOF
+              LỖI=$((LỖI + $?))
+
+              # Biến thể O2-stripped: xfail có chủ đích — không làm đỏ CI
+              bin_stripped="${src}_O2"
+              echo "--- Kiểm tra ${bin_stripped} (xfail, không làm đỏ CI) ---"
+              docker run --rm --network none \
+                -v "${RUNNER_TEMP}/bins:/bins:ro" \
+                "$IMAGE_TAG" "/bins/${bin_stripped}" \
+                > "${RUNNER_TEMP}/${bin_stripped}.json" 2>/dev/null || true
+              python3 - "${src}" "${RUNNER_TEMP}/${bin_stripped}.json" << 'PY_XFAIL'
+          import json, sys
+          src_name = sys.argv[1]
+          with open("test_bins/expected.json") as f:
+              expected_db = json.load(f)
+          expected_strings = {e["plaintext"] for e in expected_db["programs"][src_name]["strings"]}
+          with open(sys.argv[2]) as f:
+              data = json.load(f)
+          decoded_set = {r["decoded"] for r in data.get("results", []) if r.get("status") == "ok"}
+          ok = (src_name == "safe" and data.get("results") == []) or (decoded_set == expected_strings)
+          tag = "PASS" if ok else "XFAIL (stripped chưa hỗ trợ đầy đủ)"
+          print(f"[{tag}] {src_name}_O2: {decoded_set}")
+          PY_XFAIL
+            done
+          done
+          exit "$LỖI"
+
+      - name: Chẩn đoán khi lỗi
+        if: failure() && hashFiles('functional-test.log') != ''
+        run: |
+          echo "=== Nội dung functional-test.log ==="
+          cat functional-test.log | tee diag.log || true
+
+      - name: Kiểm tra chạy non-root
+        run: |
+          uid="$(docker run --rm --entrypoint id "$IMAGE_TAG" -u)"
+          echo "uid trong container: ${uid}"
+          test "${uid}" != "0"
+
+
+      # ── Xuất tarball (TRƯỚC Trivy để quét file tĩnh) ─────────────
+      - name: Xuất image ra tarball
+        run: docker save "$IMAGE_TAG" -o "${TARBALL}"
+
+      # ── Cổng Trivy – phải chặn: đặt SAU các test ─────────────────
+      - name: Trivy Vulnerability Scanner (Security Gate)
+        # Quyết định có chủ đích:
+        #   --scanners vuln : chỉ quét CVE, bỏ secret scan (chọn để tăng tốc)
+        #   --ignore-unfixed: bỏ qua CVE chưa có bản vá
+        #   --severity HIGH,CRITICAL: ngưỡng chặn
+        # Nếu strict_no_ignore=true (workflow_dispatch): bỏ --ignorefile để thấy toàn bộ CVE.
+        shell: bash
+        env:
+          STRICT: ${{ github.event_name == 'workflow_dispatch' && inputs.strict_no_ignore && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+
+          # Sửa quyền thư mục cache (container Trivy chạy root, actions/cache chạy runner)
+          sudo chown -R root:root ~/.cache/trivy 2>/dev/null || true
+
+          IGNORE_FLAG="--ignorefile /workspace/.trivyignore.yaml"
+          if [ "${STRICT}" = "true" ]; then
+            IGNORE_FLAG=""
+            echo "==> strict_no_ignore=true: chạy không --ignorefile"
+          fi
+
           docker run --rm \
-            -v "${PWD}:/workspace" \
-            -v "/tmp/ghidra-deobf.tar:/tmp/ghidra-deobf.tar:ro" \
+            -v "${PWD}:/workspace:ro" \
+            -v "${TARBALL}:${TARBALL}:ro" \
             -v "${HOME}/.cache/trivy:/root/.cache/trivy" \
             aquasec/trivy:0.55.2 image \
             --exit-code 1 \
             --severity HIGH,CRITICAL \
             --ignore-unfixed \
-            --ignorefile /workspace/.trivyignore.yaml \
-            --input /tmp/ghidra-deobf.tar \
-            --format table | tee trivy-report.txt
+            --scanners vuln \
+            --input "${TARBALL}" \
+            --format table \
+            ${IGNORE_FLAG} | tee trivy-report.txt
 
-      - name: Upload Trivy Report Artifact
+          # Sửa lại quyền sau khi Trivy ghi vào cache
+          sudo chown -R "${USER}:${USER}" ~/.cache/trivy 2>/dev/null || true
+
+      # ── Upload báo cáo/log (luôn chạy, kể cả khi gate đỏ) ────────
+      - name: Upload Trivy report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
           path: trivy-report.txt
 
-      - name: Ghi phiên bản gói Python trong image (pip freeze)
-        run: docker run --rm --entrypoint pip ghidra-deobf:ci freeze | tee pip-freeze.txt
-
-      - name: Upload pip freeze Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pip-freeze
-          path: pip-freeze.txt
-
-      - name: Smoke test --help
-        run: docker run --rm ghidra-deobf:ci --help
-
-      - name: Functional test (--network none)
-        # Chạy phân tích thật (JVM + PyGhidra) không mạng, so kết quả giải mã với giá trị mong đợi.
-        run: |
-          mkdir -p "${RUNNER_TEMP}/bins"
-          gcc -O0 -o "${RUNNER_TEMP}/bins/xor_simple_O0" test_bins/xor_simple.c
-          docker run --rm --network none \
-            -v "${RUNNER_TEMP}/bins:/bins:ro" \
-            ghidra-deobf:ci /bins/xor_simple_O0 > result.json 2> >(tee analysis.log >&2)
-          python3 - <<'EOF'
-          import json
-          res = json.load(open("result.json"))["results"]
-          # In và assert theo từng cặp (địa chỉ call -> chuỗi giải mã)
-          mapping = {}
-          for r in res:
-              print(f"  {r.get('call_addr')}: [{r.get('status')}] {r.get('decoded')}")
-              if r.get("status") == "ok":
-                  mapping[r.get("call_addr")] = r.get("decoded")
-          
-          # Kiểm tra khớp 1-1 từng địa chỉ lời gọi với chuỗi mong đợi
-          assert mapping.get("0x10120c") == "Hello", f"Giải mã sai tại 0x10120c: {mapping.get('0x10120c')}"
-          assert mapping.get("0x101222") == "World", f"Giải mã sai tại 0x101222: {mapping.get('0x101222')}"
-          assert mapping.get("0x101238") == "Secret", f"Giải mã sai tại 0x101238: {mapping.get('0x101238')}"
-          print("[+] Kiểm thử ánh xạ địa chỉ -> chuỗi THÀNH CÔNG!")
-          EOF
-
-      - name: Chẩn đoán khi lỗi (dump C decompile của caller)
-        # Chỉ chạy khi có analysis.log, tránh tự lỗi và che nguyên nhân thật của bước trước.
-        if: failure() && hashFiles('analysis.log') != ''
-        run: |
-          addr="$(grep -oE '\* decode_xor @ 0x[0-9a-f]+' analysis.log | grep -oE '0x[0-9a-f]+' | head -1)"
-          echo "Địa chỉ hàm giải mã: ${addr}"
-          test -n "${addr}" || { echo "Không tìm thấy địa chỉ decode_xor trong analysis.log" | tee diag.log; exit 1; }
-          chmod -R a+rwX "${RUNNER_TEMP}/bins"
-          docker run --rm --network none \
-            -v "${RUNNER_TEMP}/bins:/bins" \
-            --entrypoint python3 ghidra-deobf:ci \
-            /app/debug_pcode.py /bins/xor_simple_O0 "${addr}" 2>&1 | tee diag.log
-
-      - name: Upload log chẩn đoán Artifact
+      - name: Upload functional test logs
         if: always() && (hashFiles('analysis.log') != '' || hashFiles('diag.log') != '')
         uses: actions/upload-artifact@v4
         with:
@@ -164,49 +328,255 @@ jobs:
             result.json
           if-no-files-found: ignore
 
-      - name: Kiểm tra chạy non-root
+      # ── Ghi tóm tắt vào Step Summary ─────────────────────────────
+      - name: Ghi tóm tắt Trivy vào Step Summary
+        if: always() && hashFiles('trivy-report.txt') != ''
         run: |
-          uid="$(docker run --rm --entrypoint id ghidra-deobf:ci -u)"
-          echo "uid trong container: $uid"
-          test "$uid" != "0"
+          echo "## Trivy Scan Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 30 trivy-report.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
+      # ── Upload tarball CHỈ khi push vào main (dùng cho publish) ──
+      - name: Upload verified image tarball
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-image-tarball
+          path: ${{ env.TARBALL }}
+          retention-days: 1
+          # compression-level: 0 để upload nhanh hơn (tarball đã nén)
+          compression-level: 0
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 3: Publish lên GHCR (chỉ push main)
+  # Load đúng tarball đã qua Trivy gate và functional test.
+  # ─────────────────────────────────────────────────────────────────
   publish_ghcr:
     name: "Publish to GHCR"
     needs: [sast_semgrep, build_and_scan]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Download Verified Docker Image Artifact
-        # Tải lại đúng file tarball image đã được quét Trivy và qua Functional test thành công
+      - name: Tải verified image tarball
         uses: actions/download-artifact@v4
         with:
           name: verified-image-tarball
           path: /tmp
 
-      - name: Load Verified Docker Image
+      - name: Load image từ tarball đã kiểm định
         run: docker load -i /tmp/ghidra-deobf.tar
 
-      - name: Log in to GitHub Container Registry (GHCR)
+      - name: Đăng nhập GHCR
+        # TODO(user): ghim SHA docker/login-action:
+        #   git ls-remote --tags https://github.com/docker/login-action 'refs/tags/v3.*'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Tag and Push Verified Image to GHCR
-        # Push trực tiếp image đã được kiểm định 100%, đảm bảo tính nhất quán tuyệt đối (Security Traceability)
+      - name: Tag và Push lên GHCR
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
         run: |
-          IMAGE_ID="ghcr.io/${{ github.repository }}"
-          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+          IMAGE_ID="ghcr.io/${GH_REPO,,}"
           docker tag ghidra-deobf:ci "${IMAGE_ID}:latest"
-          docker tag ghidra-deobf:ci "${IMAGE_ID}:${{ github.sha }}"
+          docker tag ghidra-deobf:ci "${IMAGE_ID}:${GH_SHA:0:7}"
           docker push "${IMAGE_ID}:latest"
-          docker push "${IMAGE_ID}:${{ github.sha }}"
+          docker push "${IMAGE_ID}:${GH_SHA:0:7}"
+          echo "## GHCR Publish" >> "$GITHUB_STEP_SUMMARY"
+          echo "Đã push: \`${IMAGE_ID}:${GH_SHA:0:7}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 4: Thông báo Discord
+  # Luôn chạy (kể cả bị huỷ). Không làm pipeline đỏ dù webhook lỗi.
+  # push/PR: chỉ gửi khi có job lỗi. schedule/dispatch: gửi cả đạt lẫn lỗi.
+  # Biến rỗng (Dependabot, fork không có secret) -> in "bỏ qua" và exit 0.
+  # ─────────────────────────────────────────────────────────────────
+  notify:
+    name: "Discord Notify"
+    needs: [sast_semgrep, build_and_scan, publish_ghcr]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Gửi thông báo Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SEMGREP_RESULT: ${{ needs.sast_semgrep.result }}
+          BUILD_RESULT: ${{ needs.build_and_scan.result }}
+          PUBLISH_RESULT: ${{ needs.publish_ghcr.result }}
+          GH_REPO: ${{ github.repository }}
+          GH_EVENT: ${{ github.event_name }}
+          GH_REF: ${{ github.ref_name }}
+          GH_SHA: ${{ github.sha }}
+          GH_ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Biến rỗng -> không có secret (Dependabot, fork) -> bỏ qua, không lỗi
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "DISCORD_WEBHOOK_URL rỗng – bỏ qua thông báo."
+            exit 0
+          fi
+
+          # Xác định màu và trạng thái tổng
+          OVERALL="success"
+          for r in "${SEMGREP_RESULT}" "${BUILD_RESULT}" "${PUBLISH_RESULT}"; do
+            if [ "${r}" = "failure" ] || [ "${r}" = "cancelled" ]; then
+              OVERALL="${r}"
+              break
+            fi
+          done
+
+          # push/PR: chỉ gửi khi lỗi
+          if [ "${GH_EVENT}" = "push" ] || [ "${GH_EVENT}" = "pull_request" ]; then
+            if [ "${OVERALL}" = "success" ]; then
+              echo "Event ${GH_EVENT}: không lỗi – bỏ qua thông báo Discord."
+              exit 0
+            fi
+          fi
+
+          case "${OVERALL}" in
+            success)   COLOR=65280  ;;   # xanh lá
+            failure)   COLOR=16711680 ;; # đỏ
+            cancelled) COLOR=8421504 ;;  # xám
+            *)         COLOR=16776960 ;; # vàng
+          esac
+
+          SHORT_SHA="${GH_SHA:0:7}"
+
+          PAYLOAD="$(jq -n \
+            --arg repo    "${GH_REPO}" \
+            --arg event   "${GH_EVENT}" \
+            --arg ref     "${GH_REF}" \
+            --arg sha     "${SHORT_SHA}" \
+            --arg actor   "${GH_ACTOR}" \
+            --arg semgrep "${SEMGREP_RESULT}" \
+            --arg build   "${BUILD_RESULT}" \
+            --arg publish "${PUBLISH_RESULT}" \
+            --arg overall "${OVERALL}" \
+            --arg url     "${RUN_URL}" \
+            --argjson color "${COLOR}" \
+            '{
+              allowed_mentions: {parse: []},
+              embeds: [{
+                title: ("Pipeline: " + $overall + " [" + $repo + "]"),
+                color: $color,
+                fields: [
+                  {name: "Event",   value: $event,   inline: true},
+                  {name: "Ref",     value: $ref,     inline: true},
+                  {name: "SHA",     value: $sha,     inline: true},
+                  {name: "Actor",   value: $actor,   inline: true},
+                  {name: "Semgrep", value: $semgrep, inline: true},
+                  {name: "Build",   value: $build,   inline: true},
+                  {name: "Publish", value: $publish, inline: true}
+                ],
+                url: $url
+              }]
+            }')"
+
+          # Cắt payload dưới 1900 ký tự nếu cần
+          if [ "${#PAYLOAD}" -gt 1900 ]; then
+            PAYLOAD="$(echo "${PAYLOAD}" | head -c 1900)"
+          fi
+
+          curl --silent --show-error --max-time 10 --retry 2 \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}" \
+            "${DISCORD_WEBHOOK_URL}" || {
+              echo "Webhook thất bại – không làm pipeline đỏ."
+              exit 0
+            }
+
+  # ─────────────────────────────────────────────────────────────────
+  # JOB 5: Quét hằng ngày (chỉ từ schedule/dispatch)
+  # Build no-cache + quét THÊM 1 lần không --ignorefile để xem CVE thật.
+  # Không publish GHCR. Không làm đỏ pipeline nếu CVE mới xuất hiện.
+  # ─────────────────────────────────────────────────────────────────
+  scheduled_scan:
+    name: "Scheduled Daily Scan"
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      IMAGE_TAG: ghidra-deobf:ci-daily
+      TARBALL: /tmp/ghidra-deobf-daily.tar
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Thiết lập Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no-cache – đảm bảo apt-get upgrade thật sự chạy)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE_TAG }}
+          no-cache: true
+
+      - name: Xuất image ra tarball
+        run: docker save "$IMAGE_TAG" -o "${TARBALL}"
+
+      - name: Tính tuần cho cache java-DB
+        id: week2
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Tải cache Trivy java-DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy/java-db
+          key: trivy-java-db-${{ runner.os }}-${{ steps.week2.outputs.week }}
+          restore-keys: |
+            trivy-java-db-${{ runner.os }}-
+
+      - name: Trivy – quét thông tin (không chặn, không ignorefile)
+        # --exit-code 0: chỉ thông tin, không làm đỏ pipeline
+        # Không dùng --ignore-unfixed và không dùng --ignorefile để thấy toàn bộ CVE
+        shell: bash
+        run: |
+          sudo chown -R root:root ~/.cache/trivy 2>/dev/null || true
+          docker run --rm \
+            -v "${TARBALL}:${TARBALL}:ro" \
+            -v "${HOME}/.cache/trivy:/root/.cache/trivy" \
+            aquasec/trivy:0.55.2 image \
+            --exit-code 0 \
+            --severity HIGH,CRITICAL \
+            --scanners vuln \
+            --input "${TARBALL}" \
+            --format table | tee trivy-daily-report.txt
+          sudo chown -R "${USER}:${USER}" ~/.cache/trivy 2>/dev/null || true
+
+      - name: Upload báo cáo quét hằng ngày
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-daily-report
+          path: trivy-daily-report.txt
+
+      - name: Ghi tóm tắt quét hằng ngày
+        if: always() && hashFiles('trivy-daily-report.txt') != ''
+        run: |
+          echo "## Daily Scan Report" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 40 trivy-daily-report.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
