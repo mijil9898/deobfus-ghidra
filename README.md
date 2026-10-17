@@ -140,8 +140,4 @@ Workflow GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build
 
 ---
 
-## Quy tắc đóng góp
 
-- Comment, docstring, log, thông báo lỗi phải bằng **tiếng Việt có dấu**.
-- Không thêm thư viện mới ngoài `requirements.txt` nếu không thật sự cần.
-- Chạy `bash test_bins/check_all.sh` và `python3 test_bins/verify_encoding.py` trước khi commit (phải 0 lỗi).
