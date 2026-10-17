@@ -80,7 +80,7 @@ jobs:
       - name: Upload Semgrep SARIF
         if: always()
         # TODO(user): thay SHA (xem checkout TODO trên)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: semgrep-sarif
           path: semgrep.sarif
@@ -158,7 +158,7 @@ jobs:
           docker run --rm --entrypoint pip "$IMAGE_TAG" freeze | tee pip-freeze.txt
 
       - name: Upload pip-freeze
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pip-freeze
           path: pip-freeze.txt
@@ -312,14 +312,14 @@ jobs:
       # ── Upload báo cáo/log (luôn chạy, kể cả khi gate đỏ) ────────
       - name: Upload Trivy report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trivy-report
           path: trivy-report.txt
 
       - name: Upload functional test logs
         if: always() && (hashFiles('analysis.log') != '' || hashFiles('diag.log') != '')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: functional-test-logs
           path: |
@@ -340,7 +340,7 @@ jobs:
       # ── Upload tarball CHỈ khi push vào main (dùng cho publish) ──
       - name: Upload verified image tarball
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: verified-image-tarball
           path: ${{ env.TARBALL }}
@@ -568,7 +568,7 @@ jobs:
 
       - name: Upload báo cáo quét hằng ngày
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trivy-daily-report
           path: trivy-daily-report.txt
