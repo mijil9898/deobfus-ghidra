@@ -28,16 +28,20 @@ RUN set -eu; \
 FROM ${BASE_IMAGE}
 
 # Ghidra 12.x cần JDK 21; libstdc++6 cho bộ decompiler native.
+# ARG CACHE_DATE được workflow truyền vào khi chạy theo lịch (schedule)
+# để buộc layer này không dùng cache, đảm bảo apt-get upgrade thật sự chạy.
+ARG CACHE_DATE=cached
 RUN apt-get update \
  && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends openjdk-21-jdk-headless libstdc++6 \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools \
+ && pip install --no-cache-dir --upgrade -r /app/requirements.txt
 
 COPY --from=ghidra /opt/ghidra /opt/ghidra
-COPY ghidra_auto.py find_candidates.py debug_pcode.py /app/
+COPY ghidra_auto.py find_candidates.py pcode_analysis.py debug_pcode.py /app/
 
 # User non-root; thư mục project Ghidra phải ghi được (binary có thể mount read-only).
 RUN useradd --create-home --uid 10001 app \

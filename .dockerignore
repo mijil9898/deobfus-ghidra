@@ -4,4 +4,5 @@
 !requirements.txt
 !ghidra_auto.py
 !find_candidates.py
+!pcode_analysis.py
 !debug_pcode.py
