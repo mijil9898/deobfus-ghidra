@@ -164,7 +164,8 @@ def extract_strings_from_c(c_code, func_name, algo):
             for j, b in enumerate(bv):
                 mem[a + j] = b
 
-    tsize = {"undefined": 1, "undefined1": 1, "undefined2": 2, "undefined4": 4, "undefined8": 8,
+    tsize = {"undefined": 1, "undefined1": 1, "undefined2": 2, "undefined3": 3, "undefined4": 4, "undefined5": 5,
+             "undefined6": 6, "undefined7": 7, "undefined8": 8,
              "byte": 1, "char": 1, "short": 2, "ushort": 2, "int": 4, "uint": 4,
              "long": 8, "ulong": 8, "longlong": 8, "ulonglong": 8}
     vsize = {}
@@ -361,10 +362,38 @@ def run_decode(algo, data, key, **kwargs):
 
 
 # === MODULE 2d: ÁNH XẠ ĐIỂM GỌI THEO BẰNG CHỨNG ===
+def _offset_stack_tu_varnode(vn):
+    """
+    Lấy stack offset (số nguyên có dấu) của đối số con trỏ truyền vào CALL.
+    Đối số là biến tạm do PTRSUB(thanh ghi stack, hằng âm) tạo ra, có thể bọc thêm CAST.
+    Tuyệt đối không dùng tên HighVariable (luôn UNNAMED với biến tạm).
+    Trả về None nếu không xác định được bằng chứng.
+    """
+    from ghidra.program.model.pcode import PcodeOp
+    for _ in range(4):  # đi xuyên tối đa vài lớp CAST
+        if vn is None:
+            return None
+        d = vn.getDef()
+        if d is None:
+            return None
+        if d.getOpcode() == PcodeOp.CAST:
+            vn = d.getInput(0)
+            continue
+        if d.getOpcode() == PcodeOp.PTRSUB and d.getNumInputs() >= 2:
+            hang = d.getInput(1)
+            if hang is not None and hang.isConstant():
+                # getOffset() trả unsigned 64-bit; cần ép dấu để có giá trị âm
+                v = int(hang.getOffset()) & 0xFFFFFFFFFFFFFFFF
+                return v if v < 0x8000000000000000 else v - 0x10000000000000000
+        return None
+    return None
+
+
 def _map_goi_theo_dich(hf_caller, entry_ham_giai_ma):
     """
-    Ánh xạ từng điểm gọi → tên biến đích (đối số đầu tiên), dựa trên High Pcode.
-    Trả về dict: {địa_chỉ_gọi: tên_biến_đích hoặc offset stack nếu không có tên}.
+    Ánh xạ từng điểm gọi → stack offset của đối số đầu tiên (bằng chứng từ High Pcode).
+    Trả về dict {offset_địa_chỉ_call: stack_offset (int có dấu)}.
+    Biến tạm không có tên (UNNAMED) nên KHÔNG dùng tên; chỉ dùng offset.
     """
     from ghidra.program.model.pcode import PcodeOp
     anh_xa = {}
@@ -376,34 +405,28 @@ def _map_goi_theo_dich(hf_caller, entry_ham_giai_ma):
         vn_ham = op.getInput(0)
         if vn_ham is None or vn_ham.getAddress() != entry_ham_giai_ma:
             continue
-        dia_chi = op.getSeqnum().getTarget().getOffset()
-        if op.getNumInputs() > 1:
-            vn_dich = op.getInput(1)
-            if vn_dich is not None:
-                # Xử lý varnode: nếu là tạm (isUnique) thì thông qua def để lấy offset stack
-                try:
-                    d = vn_dich.getDef()
-                    if d is not None:
-                        # PTRSUB: offset ở input(1)
-                        if d.getOpcode() == PcodeOp.PTRSUB:
-                            off_vn = d.getInput(1)
-                            if off_vn is not None:
-                                anh_xa[dia_chi] = off_vn.getOffset()
-                                continue
-                        # CAST có thể bọc PTRSUB
-                        if d.getOpcode() == PcodeOp.CAST:
-                            inner = d.getInput(0)
-                            if inner is not None and inner.getOpcode() == PcodeOp.PTRSUB:
-                                off_vn = inner.getInput(1)
-                                if off_vn is not None:
-                                    anh_xa[dia_chi] = off_vn.getOffset()
-                                    continue
-                except Exception:
-                    pass
-                hv = vn_dich.getHigh()
-                if hv is not None:
-                    anh_xa[dia_chi] = hv.getName()
+        if op.getNumInputs() <= 1:
+            continue
+        dia_chi = int(op.getSeqnum().getTarget().getOffset())
+        stack_off = _offset_stack_tu_varnode(op.getInput(1))
+        if stack_off is not None:
+            anh_xa[dia_chi] = stack_off
     return anh_xa
+
+
+_RE_TEN_STACK = re.compile(r"^(?:local|[a-z]{1,3}Stack)_([0-9a-fA-F]+)$")
+
+
+def _offset_tu_ten_c(bieu_thuc):
+    """
+    Đổi tên biến C của Ghidra (local_23, acStack_28, &local_1d, (char *)local_17)
+    thành stack offset: local_XX nghĩa là Stack[-0xXX]. Không nhận ra thì trả None.
+    """
+    if not bieu_thuc:
+        return None
+    ten = _nws(_lam_sach_bieu_thuc(bieu_thuc))
+    m = _RE_TEN_STACK.match(ten)
+    return -int(m.group(1), 16) if m else None
 
 
 # === MODULE 2e: GHI COMMENT + BOOKMARK ===
@@ -461,52 +484,50 @@ def process_binary(binary_path, project_dir=None):
                 print(f"  Caller: {caller_func.getName()} ({len(sites)} gọi)", file=sys.stderr)
                 decoded_list, _ = extract_strings_from_c(c_code, dfunc.getName(), algo)
 
-                # Ánh xạ điểm gọi → biến đích bằng High Pcode
+                # Ánh xạ điểm gọi → stack offset của đối số đầu bằng High Pcode
                 anh_xa_dich = {}
                 if hf_caller is not None:
                     anh_xa_dich = _map_goi_theo_dich(hf_caller, dfunc.getEntryPoint())
 
-                # Xây dict kết quả giải mã, khoá theo tên biến đích
-                tu_dien_giai_ma = {}
-                co_trung = set()
+                # Bảng tra kết quả giải mã theo stack offset suy ra từ tên biến C
+                tu_dien_off = {}
+                trung_off = set()
                 for item in decoded_list:
-                    for khoa in set(filter(None, [
-                        _nws(item.get("dest_src", "")),
-                        _nws(item.get("dest", "")),
-                        _nws(_lam_sach_bieu_thuc(item.get("dest", ""))),
-                    ])):
-                        if khoa in tu_dien_giai_ma and tu_dien_giai_ma[khoa] is not item:
-                            co_trung.add(khoa)
-                        tu_dien_giai_ma[khoa] = item
+                    cac_off = {o for o in (
+                        _offset_tu_ten_c(item.get("dest_src", "")),
+                        _offset_tu_ten_c(item.get("dest", "")),
+                    ) if o is not None}
+                    for o in cac_off:
+                        if o in tu_dien_off and tu_dien_off[o] is not item:
+                            trung_off.add(o)
+                        tu_dien_off[o] = item
 
                 for call_addr in sites_sorted:
-                    off = call_addr.getOffset()
+                    off = int(call_addr.getOffset())
                     print(f"    call @ 0x{off:x}", file=sys.stderr)
-                    ten_dich = anh_xa_dich.get(off)
-                    da_ghep = False
-                    if ten_dich is not None:
-                        # Thử khớp tên biến từ Pcode với kết quả giải mã
-                        for khoa_thu in [_nws(ten_dich), _nws(_lam_sach_bieu_thuc(ten_dich))]:
-                            if khoa_thu in tu_dien_giai_ma and khoa_thu not in co_trung:
-                                info = dict(tu_dien_giai_ma[khoa_thu])
-                                info["call_addr"] = f"0x{off:x}"
-                                all_results.append(info)
-                                da_ghep = True
-                                if info.get("status") != "ok":
-                                    print(f"      [!] {info['status']}", file=sys.stderr)
-                                else:
-                                    decoded = info["decoded"]
-                                    print(f'      [+] "{decoded}"', file=sys.stderr)
-                                    tx = program.startTransaction("deobf")
-                                    try:
-                                        _comment(program, off, f'deobf [{algo}]: "{decoded}"')
-                                        _bookmark(program, off, f"deobf: {decoded}")
-                                    finally:
-                                        program.endTransaction(tx, True)
-                                break
-                    if not da_ghep:
-                        print(f"      [!] không ghép được điểm gọi với chuỗi", file=sys.stderr)
+                    stack_off = anh_xa_dich.get(off)
+                    item = None
+                    if stack_off is not None and stack_off not in trung_off:
+                        item = tu_dien_off.get(stack_off)
+                    if item is None:
+                        print("      [!] không ghép được điểm gọi với chuỗi "
+                              f"(stack offset={stack_off})", file=sys.stderr)
                         all_results.append(dict(call_addr=f"0x{off:x}", status="khong_ghep_duoc"))
+                        continue
+                    info = dict(item)
+                    info["call_addr"] = f"0x{off:x}"
+                    all_results.append(info)
+                    if info.get("status") != "ok":
+                        print(f"      [!] {info['status']}", file=sys.stderr)
+                        continue
+                    decoded = info["decoded"]
+                    print(f'      [+] "{decoded}"', file=sys.stderr)
+                    tx = program.startTransaction("deobf")
+                    try:
+                        _comment(program, off, f'deobf [{algo}]: "{decoded}"')
+                        _bookmark(program, off, f"deobf: {decoded}")
+                    finally:
+                        program.endTransaction(tx, True)
 
         dc.dispose()
         return dict(binary=binary_path, results=all_results)
