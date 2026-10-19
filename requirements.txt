@@ -2,6 +2,6 @@
 pyghidra==3.1.0
 
 # Ghim các phiên bản an toàn để vượt qua Trivy (bản cũ bị lỗi HIGH)
-msgpack>=1.2.1
+msgpack>=1.2.3
 urllib3>=2.8.0
 setuptools>=78.1.1
