@@ -85,3 +85,17 @@ Module deobfuscation cần:
 1. **Tìm đúng** hàm giải mã trong 3 file đầu
 2. **Không gắn cờ nhầm** bất kỳ hàm nào trong `safe.c`
 3. **Tính lại** chuỗi gốc và khớp với `expected.json`
+
+## Ghi chú: Offset PIE và địa chỉ Ghidra
+
+Binary được biên dịch dạng **PIE** (Position Independent Executable). Địa chỉ entry trả về từ `nm` (và ghi trong `expected_addresses.json`) là **offset PIE**, không phải địa chỉ tuyệt đối.
+
+Khi nạp vào Ghidra với image base mặc định `0x100000` (x86-64 PIE):
+
+```
+địa_chỉ_trong_Ghidra = 0x100000 + offset_từ_nm
+```
+
+**Ví dụ**: nếu `nm` báo `decode_xor` ở offset `0x1149`, thì trong Ghidra tìm tại `0x101149`.
+
+Với bản **stripped** (`_O2`): nạp bản `_O2_sym` (cùng lần biên dịch, giữ symbol) để tìm địa chỉ hàm, vì `_O2` và `_O2_sym` có layout bộ nhớ hoàn toàn giống nhau.
