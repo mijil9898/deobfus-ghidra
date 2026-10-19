@@ -19,3 +19,4 @@ venv/
 
 # === Thư mục project PyGhidra tự tạo (<binary>_ghidra) ===
 *_ghidra/
+.agents/
