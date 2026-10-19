@@ -1,7 +1,9 @@
-# Bộ Kiểm Thử — Module 0
+# Bộ Kiểm Thử Binary — Deobfuscation Chuỗi
 
-Thư mục này chứa **4 chương trình C** dùng làm binary kiểm thử cho module
-deobfuscation chuỗi (sẽ viết ở các module sau).
+Thư mục này chứa **4 chương trình C** dùng làm binary kiểm thử cho công cụ
+deobfuscation chuỗi `ghidra_auto.py`. Địa chỉ trong `expected_addresses.json`
+là **offset PIE** — địa chỉ thực trong Ghidra = `0x100000 + offset`
+(image base mặc định x86-64 PIE của Ghidra).
 
 ## Cấu trúc file
 
