@@ -185,7 +185,7 @@ jobs:
             gcc -O2 -s -o "${RUNNER_TEMP}/bins/${src}_O2" "test_bins/${src}.c"
           done
 
-          LỖI=0
+          SO_LOI=0
           for src in "${SRCS[@]}"; do
             for opt in O0; do
               bin="${src}_${opt}"
@@ -228,7 +228,7 @@ jobs:
                   sys.exit(1)
               print(f"[PASS] {src_name}: {decoded_set}")
           PY_EOF
-              LỖI=$((LỖI + $?))
+              SO_LOI=$((SO_LOI + $?))
 
               # Biến thể O2-stripped: xfail có chủ đích — không làm đỏ CI
               bin_stripped="${src}_O2"
@@ -252,7 +252,7 @@ jobs:
           PY_XFAIL
             done
           done
-          exit "$LỖI"
+          exit "$SO_LOI"
 
       - name: Chẩn đoán khi lỗi
         if: failure() && hashFiles('functional-test.log') != ''

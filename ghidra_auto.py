@@ -364,7 +364,7 @@ def run_decode(algo, data, key, **kwargs):
 def _map_goi_theo_dich(hf_caller, entry_ham_giai_ma):
     """
     Ánh xạ từng điểm gọi → tên biến đích (đối số đầu tiên), dựa trên High Pcode.
-    Trả về dict: {offset_địa_chỉ: tên_biến_đích}.
+    Trả về dict: {địa_chỉ_gọi: tên_biến_đích hoặc offset stack nếu không có tên}.
     """
     from ghidra.program.model.pcode import PcodeOp
     anh_xa = {}
@@ -380,6 +380,26 @@ def _map_goi_theo_dich(hf_caller, entry_ham_giai_ma):
         if op.getNumInputs() > 1:
             vn_dich = op.getInput(1)
             if vn_dich is not None:
+                # Xử lý varnode: nếu là tạm (isUnique) thì thông qua def để lấy offset stack
+                try:
+                    d = vn_dich.getDef()
+                    if d is not None:
+                        # PTRSUB: offset ở input(1)
+                        if d.getOpcode() == PcodeOp.PTRSUB:
+                            off_vn = d.getInput(1)
+                            if off_vn is not None:
+                                anh_xa[dia_chi] = off_vn.getOffset()
+                                continue
+                        # CAST có thể bọc PTRSUB
+                        if d.getOpcode() == PcodeOp.CAST:
+                            inner = d.getInput(0)
+                            if inner is not None and inner.getOpcode() == PcodeOp.PTRSUB:
+                                off_vn = inner.getInput(1)
+                                if off_vn is not None:
+                                    anh_xa[dia_chi] = off_vn.getOffset()
+                                    continue
+                except Exception:
+                    pass
                 hv = vn_dich.getHigh()
                 if hv is not None:
                     anh_xa[dia_chi] = hv.getName()
